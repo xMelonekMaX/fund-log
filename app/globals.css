@@ -1,0 +1,102 @@
+@import "tailwindcss";
+@config '../tailwind.config.ts';
+
+@font-face {
+  font-family: "SF Pro";
+  src: url("../assets/fonts/SFPRODISPLAYREGULAR.OTF") format("opentype");
+  font-style: normal;
+  font-weight: 400;
+}
+@font-face {
+  font-family: "SF Pro";
+  src: url("../assets/fonts/SFPRODISPLAYMEDIUM.OTF") format("opentype");
+  font-style: normal;
+  font-weight: 600;
+}
+@font-face {
+  font-family: "SF Pro";
+  src: url("../assets/fonts/SFPRODISPLAYBOLD.OTF") format("opentype");
+  font-style: normal;
+  font-weight: 700;
+}
+
+html {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body {
+  color: #fff;
+  background-color: #000;
+  font-family: SF Pro;
+  scrollbar-gutter: stable both-edges;
+  -webkit-tap-highlight-color: transparent;
+}
+
+:root {
+  --primary: #008236;
+}
+
+img {
+  -webkit-user-drag: none;
+  -khtml-user-drag: none;
+  -moz-user-drag: none;
+  -o-user-drag: none;
+  -ms-user-drag: none;
+  user-drag: none;
+}
+
+::selection {
+  background: rgba(0, 123, 51, 0.2);
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+input {
+  outline: none;
+  caret-color: var(--primary);
+}
+
+@layer base {
+  :root {
+    --radius: 0.5rem;
+  }
+
+  :root {
+    --color-gray-light: #656569;
+    --color-gray-semilight: #3a3a3c;
+    --color-gray-medium: #2c2c2e;
+    --color-gray-dark: #1c1c1e;
+  }
+}
+
+@theme {
+  --color-primary: var(--primary);
+  --color-primary-highlighted: #329b5e;
+
+  --color-gray-light: #656569;
+  --color-gray-semilight: #3a3a3c;
+  --color-gray-medium: #2c2c2e;
+  --color-gray-dark: #1c1c1e;
+
+  --color-drawer-header: #373738;
+  --color-nav-button: #bebebe;
+  --color-separator: #3d3d41;
+
+  --z-index-bump: 10;
+  --z-index-header: 20;
+  --z-index-drawer: 30;
+  --z-index-drawer-header: 40;
+}
+
+@custom-variant supports-hover {
+  @media (hover: hover) {
+    @slot;
+  }
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+}
