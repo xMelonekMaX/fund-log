@@ -9,7 +9,7 @@
   <p align="center">
     A Next.js app for tracking expenses and visualizing stats. Works fully offline with seamless sync to MongoDB, supports GitHub/Google OAuth, and mimics the look of native iOS apps using Tailwind and shadcn/ui
     <br />
-    <a href="https://fundlog.xmelonekmax.pl"><strong>Open the app »</strong></a>
+    <a href="https://fundlog.hubtale.net"><strong>Open the app »</strong></a>
   </p>
 </div>
 
@@ -83,4 +83,3 @@ The app will be available at [http://localhost:3000](http://localhost:3000)
 * Dexie.js
 * Tailwind CSS
 * shadcn/ui
-
