@@ -83,3 +83,11 @@ The app will be available at [http://localhost:3000](http://localhost:3000)
 * Dexie.js
 * Tailwind CSS
 * shadcn/ui
+
+<br />
+
+## ☁️ Hosting & Infrastructure
+- Cloudflare (proxy + SSL)
+- Oracle Cloud VPS
+- Docker
+- Nginx
