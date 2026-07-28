@@ -3,7 +3,7 @@ import { IExpenseLocal } from "@/models/Expense";
 
 export function resolveConflicts<T extends ICategoryLocal | IExpenseLocal>(
   local: T[],
-  server: T[]
+  server: T[],
 ) {
   const toUpload: T[] = [];
   const toSave: T[] = [];
@@ -12,7 +12,7 @@ export function resolveConflicts<T extends ICategoryLocal | IExpenseLocal>(
 
   for (const localDocument of local) {
     const serverDocument = server.find(
-      (document) => document._id === localDocument._id
+      (document) => document._id === localDocument._id,
     );
 
     if (!serverDocument) {
