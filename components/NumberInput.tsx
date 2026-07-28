@@ -62,7 +62,7 @@ export function NumberInput({ defaultValue, onChange }: TNumberInputProps) {
   return (
     <input
       type="text"
-      inputMode="numeric"
+      inputMode="decimal"
       pattern="[0-9]*"
       value={inputValue}
       onChange={handleChange}
