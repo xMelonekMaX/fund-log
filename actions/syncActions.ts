@@ -9,36 +9,41 @@ import { IPaginatedResponse } from "@/types/paginatedResponse";
 
 export async function fetchModifiedCategoriesBatch(
 	page: number,
-	since: Date
+	since: Date,
+	afterId?: string,
+	expectedUserId?: string
 ): Promise<IPaginatedResponse<ICategoryLocal[]>> {
 	try {
 		const user = await getUserIfSessionValid();
-		if (!user) throw new Error("Unauthorized");
+		if (!user || (expectedUserId && user.id !== expectedUserId)) throw new Error("Unauthorized");
 
-		const skip = (page - 1) * SYNC_BATCH_SIZE;
+		const skip = afterId === undefined ? (page - 1) * SYNC_BATCH_SIZE : 0;
 		const [rawData, total] = await Promise.all([
 			Category.find({
 				userId: user.id,
 				updatedAt: { $gt: since },
+				...(afterId ? { _id: { $gt: afterId } } : {}),
 			})
-				.sort({ updatedAt: -1 })
+				.sort({ _id: 1 })
 				.skip(skip)
-				.limit(SYNC_BATCH_SIZE)
+				.limit(SYNC_BATCH_SIZE + 1)
+				.select("-__v -userId")
 				.lean<ICategory[]>(),
 			Category.countDocuments({
 				userId: user.id,
 				updatedAt: { $gt: since },
+				...(afterId ? { _id: { $gt: afterId } } : {}),
 			}),
 		]);
 
-		const data = rawData.map(({ userId, ...document }) => ({
+		const data = rawData.slice(0, SYNC_BATCH_SIZE).map((document) => ({
 			...document,
 			_id: document._id.toString(),
 		}));
 
 		return {
 			data,
-			hasMore: skip + SYNC_BATCH_SIZE < total,
+			hasMore: rawData.length > SYNC_BATCH_SIZE,
 			total,
 		};
 	} catch (error) {
@@ -49,29 +54,34 @@ export async function fetchModifiedCategoriesBatch(
 
 export async function fetchModifiedExpensesBatch(
 	page: number,
-	since: Date
+	since: Date,
+	afterId?: string,
+	expectedUserId?: string
 ): Promise<IPaginatedResponse<IExpenseLocal[]>> {
 	try {
 		const user = await getUserIfSessionValid();
-		if (!user) throw new Error("Unauthorized");
+		if (!user || (expectedUserId && user.id !== expectedUserId)) throw new Error("Unauthorized");
 
-		const skip = (page - 1) * SYNC_BATCH_SIZE;
+		const skip = afterId === undefined ? (page - 1) * SYNC_BATCH_SIZE : 0;
 		const [rawData, total] = await Promise.all([
 			Expense.find({
 				userId: user.id,
 				updatedAt: { $gt: since },
+				...(afterId ? { _id: { $gt: afterId } } : {}),
 			})
-				.sort({ updatedAt: -1 })
+				.sort({ _id: 1 })
 				.skip(skip)
-				.limit(SYNC_BATCH_SIZE)
+				.limit(SYNC_BATCH_SIZE + 1)
+				.select("-__v -userId")
 				.lean<IExpense[]>(),
 			Expense.countDocuments({
 				userId: user.id,
 				updatedAt: { $gt: since },
+				...(afterId ? { _id: { $gt: afterId } } : {}),
 			}),
 		]);
 
-		const data = rawData.map(({ userId, ...document }) => ({
+		const data = rawData.slice(0, SYNC_BATCH_SIZE).map((document) => ({
 			...document,
 			_id: document._id.toString(),
 			categoryId: document.categoryId.toString(),
@@ -80,7 +90,7 @@ export async function fetchModifiedExpensesBatch(
 
 		return {
 			data,
-			hasMore: skip + SYNC_BATCH_SIZE < total,
+			hasMore: rawData.length > SYNC_BATCH_SIZE,
 			total,
 		};
 	} catch (error) {
@@ -89,15 +99,16 @@ export async function fetchModifiedExpensesBatch(
 	}
 }
 
-export async function uploadCategoriesBatch(categories: ICategoryLocal[]) {
+export async function uploadCategoriesBatch(categories: ICategoryLocal[], expectedUserId?: string): Promise<ICategoryLocal[]> {
+	if (categories.length === 0) return [];
 	try {
 		const user = await getUserIfSessionValid();
-		if (!user) throw new Error("Unauthorized");
+		if (!user || (expectedUserId && user.id !== expectedUserId)) throw new Error("Unauthorized");
 
 		const existingCategories = await Category.find({
 			_id: { $in: categories.map((category) => category._id) },
 		})
-			.select("_id userId")
+			.select("_id userId updatedAt")
 			.lean();
 
 		const unauthorizedAccess = existingCategories.some(
@@ -114,6 +125,7 @@ export async function uploadCategoriesBatch(categories: ICategoryLocal[]) {
 				filter: {
 					_id: category._id,
 					userId: user.id,
+					$or: [{ updatedAt: { $lte: category.updatedAt } }, { updatedAt: { $exists: false } }],
 				},
 				update: {
 					$set: {
@@ -122,12 +134,13 @@ export async function uploadCategoriesBatch(categories: ICategoryLocal[]) {
 						icon: category.icon,
 						color: category.color,
 						subcategories: category.subcategories,
-						deletedAt: category.deletedAt,
+						...(category.deletedAt ? { deletedAt: category.deletedAt } : {}),
 						createdAt: category.createdAt,
 						updatedAt: category.updatedAt,
 					},
+					...(!category.deletedAt ? { $unset: { deletedAt: 1 } } : {}),
 				},
-				upsert: true,
+				upsert: !existingCategories.some((existing) => existing._id === category._id),
 			},
 		}));
 
@@ -135,21 +148,28 @@ export async function uploadCategoriesBatch(categories: ICategoryLocal[]) {
 			ordered: false,
 			timestamps: false,
 		});
+
+		// Return the authoritative version, including a concurrent newer write.
+		return await Category.find({
+			_id: { $in: categories.map((document) => document._id) },
+			userId: user.id,
+		}).select("-userId -__v").lean<ICategoryLocal[]>();
 	} catch (error) {
 		console.error("Upload categories batch failed:", error);
 		throw error;
 	}
 }
 
-export async function uploadExpensesBatch(expenses: IExpenseLocal[]) {
+export async function uploadExpensesBatch(expenses: IExpenseLocal[], expectedUserId?: string): Promise<IExpenseLocal[]> {
+	if (expenses.length === 0) return [];
 	try {
 		const user = await getUserIfSessionValid();
-		if (!user) throw new Error("Unauthorized");
+		if (!user || (expectedUserId && user.id !== expectedUserId)) throw new Error("Unauthorized");
 
 		const existingExpenses = await Expense.find({
 			_id: { $in: expenses.map((expense) => expense._id) },
 		})
-			.select("_id userId")
+			.select("_id userId updatedAt")
 			.lean();
 
 		const unauthorizedAccess = existingExpenses.some(
@@ -164,22 +184,27 @@ export async function uploadExpensesBatch(expenses: IExpenseLocal[]) {
 				filter: {
 					_id: expense._id,
 					userId: user.id,
+					$or: [{ updatedAt: { $lte: expense.updatedAt } }, { updatedAt: { $exists: false } }],
 				},
 				update: {
 					$set: {
 						userId: user.id,
 						categoryId: expense.categoryId,
-						subcategoryId: expense.subcategoryId,
+						...(expense.subcategoryId ? { subcategoryId: expense.subcategoryId } : {}),
 						amount: expense.amount,
 						currency: expense.currency,
 						description: expense.description,
 						date: expense.date,
-						deletedAt: expense.deletedAt,
+						...(expense.deletedAt ? { deletedAt: expense.deletedAt } : {}),
 						createdAt: expense.createdAt,
 						updatedAt: expense.updatedAt,
 					},
+					$unset: {
+						...(!expense.deletedAt ? { deletedAt: 1 } : {}),
+						...(!expense.subcategoryId ? { subcategoryId: 1 } : {}),
+					},
 				},
-				upsert: true,
+				upsert: !existingExpenses.some((existing) => existing._id === expense._id),
 			},
 		}));
 
@@ -187,6 +212,12 @@ export async function uploadExpensesBatch(expenses: IExpenseLocal[]) {
 			ordered: false,
 			timestamps: false,
 		});
+
+		// Return the authoritative version, including a concurrent newer write.
+		return await Expense.find({
+			_id: { $in: expenses.map((document) => document._id) },
+			userId: user.id,
+		}).select("-userId -__v").lean<IExpenseLocal[]>();
 	} catch (error) {
 		console.error("Upload expenses batch failed:", error);
 		throw error;

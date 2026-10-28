@@ -1,7 +1,6 @@
 {
   "english": "Angielski",
   "polish": "Polski",
-
   "overview": "Przegląd",
   "analytics": "Analiza",
   "settings": "Ustawienia",
@@ -43,5 +42,6 @@
   "tryInDemoMode": "Wypróbuj w trybie demo",
   "description": "Zapisuj wydatki i analizuj je na czytelnych wykresach.",
   "signInMethods": "Metody logowania",
-  "installAsApp": "Zainstaluj jako aplikację"
+  "installAsApp": "Zainstaluj jako aplikację",
+  "demoBlockedByLocalData": "Na tym urządzeniu są zapisane dane. Zaloguj się na swoje konto; tryb demo nie zastąpi Twoich wydatków."
 }

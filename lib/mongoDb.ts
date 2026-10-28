@@ -1,34 +1,30 @@
 "use server";
 
-import { connect, ConnectionStates } from "mongoose";
+import mongoose, { connect, ConnectionStates } from "mongoose";
 
 const MONGODB_URI = process.env.MONGODB_URI;
 const useTls = process.env.MONGODB_TLS === "true";
 
 if (!MONGODB_URI) {
-	throw new Error("Please define the MONGODB_URI environment variable");
+  throw new Error("Please define the MONGODB_URI environment variable");
 }
 
-let isConnected: ConnectionStates;
+let connecting: Promise<typeof mongoose> | undefined;
 
 export async function connectDb() {
-	if (isConnected) return;
-
-	try {
-		const db = await connect(MONGODB_URI as string, {
-			tls: useTls,
-			...(useTls && process.env.MONGODB_CA_FILE
-				? { tlsCAFile: process.env.MONGODB_CA_FILE }
-				: {}),
-		});
-		isConnected = db.connections[0].readyState;
-
-		if (isConnected == ConnectionStates.connected) {
-			console.log("✅ Successfully connected to MongoDB database");
-		} else {
-			console.log("❌ Unexpected connection state:", isConnected);
-		}
-	} catch (error) {
-		console.error("❌ MongoDB connection error:", error);
-	}
+  if (mongoose.connection.readyState === ConnectionStates.connected) return;
+  if (!connecting) {
+    connecting = connect(MONGODB_URI as string, {
+      tls: useTls,
+      ...(useTls && process.env.MONGODB_CA_FILE
+        ? { tlsCAFile: process.env.MONGODB_CA_FILE }
+        : {}),
+    });
+  }
+  try {
+    await connecting;
+  } finally {
+    // A failed attempt can be retried, and disconnected clients check live state.
+    connecting = undefined;
+  }
 }

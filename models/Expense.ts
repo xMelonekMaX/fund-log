@@ -34,7 +34,7 @@ const ExpenseSchema = new mongoose.Schema(
 		},
 		amount: { type: Number, required: true },
 		currency: { type: String, required: true },
-		description: { type: String, required: true },
+		description: { type: String, default: "" },
 		date: { type: Date, required: true },
 		deletedAt: { type: Date },
 		createdAt: { type: Date, required: true },
@@ -44,6 +44,7 @@ const ExpenseSchema = new mongoose.Schema(
 );
 
 ExpenseSchema.index({ userId: 1 });
+ExpenseSchema.index({ userId: 1, _id: 1 });
 ExpenseSchema.index({ categoryId: 1 });
 ExpenseSchema.index({ date: -1 });
 ExpenseSchema.index({ updatedAt: -1 });

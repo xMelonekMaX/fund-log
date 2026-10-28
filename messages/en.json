@@ -1,7 +1,6 @@
 {
   "english": "English",
   "polish": "Polish",
-
   "overview": "Overview",
   "analytics": "Analytics",
   "settings": "Settings",
@@ -43,5 +42,6 @@
   "tryInDemoMode": "Try in Demo Mode",
   "description": "Save your expenses and analyze them with clear charts.",
   "signInMethods": "Sign-In Methods",
-  "installAsApp": "Install as App"
+  "installAsApp": "Install as App",
+  "demoBlockedByLocalData": "This device has saved data. Sign in to your account; demo mode will not replace your expenses."
 }

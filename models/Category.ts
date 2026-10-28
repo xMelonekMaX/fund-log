@@ -47,6 +47,7 @@ const CategorySchema = new mongoose.Schema(
 );
 
 CategorySchema.index({ userId: 1 });
+CategorySchema.index({ userId: 1, _id: 1 });
 CategorySchema.index({ updatedAt: -1 });
 
 const Category =

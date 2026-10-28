@@ -4,8 +4,14 @@ import { v4 as uuidv4 } from "uuid";
 import { IExpenseLocal } from "@/models/Expense";
 import { localDb } from "./indexedDb";
 
-export function initializeDemoMode() {
-  setDemoData();
+export async function initializeDemoMode() {
+  if (!isDemoMode()) {
+    const [expenses, categories] = await Promise.all([
+      localDb.expenses.count(), localDb.categories.count(),
+    ]);
+    if (expenses || categories) throw new Error("Local data must be preserved");
+  }
+  await setDemoData();
   localStorage.setItem(LOCAL_STORAGE_KEYS.IS_DEMO, "true");
   localStorage.removeItem(LOCAL_STORAGE_KEYS.USER_ID);
 }
@@ -19,8 +25,8 @@ export function exitDemoMode() {
   localDb.delete({ disableAutoOpen: false });
 }
 
-function setDemoData() {
-  localDb.delete({ disableAutoOpen: false });
+async function setDemoData() {
+  await localDb.delete({ disableAutoOpen: false });
 
   const now = new Date();
 
@@ -297,6 +303,8 @@ function setDemoData() {
     },
   ];
 
-  localDb.categories.bulkAdd(categories);
-  localDb.expenses.bulkAdd(expenses);
+  await localDb.transaction("rw", localDb.categories, localDb.expenses, async () => {
+    await localDb.categories.bulkAdd(categories);
+    await localDb.expenses.bulkAdd(expenses);
+  });
 }

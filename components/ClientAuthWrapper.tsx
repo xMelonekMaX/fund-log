@@ -6,7 +6,6 @@ import { LANGUAGES, LOCAL_STORAGE_KEYS } from "@/lib/constants";
 import { syncCategories } from "@/lib/sync/categoriesSyncUtils";
 import { syncExpenses } from "@/lib/sync/expensesSyncUtils";
 import {
-  clearIndexedDb,
   getBooleanFromLocalStorage,
   getUserSyncState,
   setLastUserSyncTime,
@@ -24,6 +23,7 @@ import { Locale, useLocale } from "next-intl";
 import { SelectedLanguageContext } from "@/contexts/SelectedLanguageContext";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useParams } from "next/navigation";
+import { prepareLocalAccount } from "@/lib/prepareLocalAccount";
 
 type TSessionDataProviderProps = {
   children: React.ReactNode;
@@ -40,6 +40,8 @@ export function ClientAuthWrapper({
   const params = useParams();
   const isOnline = useOnlineStatus();
   const [isLoading, setIsLoading] = useState(true);
+  const [accountReady, setAccountReady] = useState(false);
+  const [accountBlocked, setAccountBlocked] = useState(false);
   const [defaultCurrency, setDefaultCurrency] = useLocalStorage<TCurrency>(
     LOCAL_STORAGE_KEYS.DEFAULT_CURRENCY_CODE,
     LANGUAGES[locale].currency
@@ -94,22 +96,16 @@ export function ClientAuthWrapper({
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    let accountPrepared = false;
+    setAccountReady(false);
     async function syncData(sessionData: ISessionData) {
-      const userId = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_ID);
-      if (sessionData.userId !== userId) {
-        localStorage.clear();
-        await clearIndexedDb();
-      }
-
-      localStorage.setItem(
-        LOCAL_STORAGE_KEYS.IS_SESSION_VALID,
-        sessionData.isSessionValid.toString()
-      );
-
-      if (!sessionData.isSessionValid) return;
-
-      localStorage.setItem(LOCAL_STORAGE_KEYS.USER_ID, sessionData.userId);
-      localStorage.setItem(LOCAL_STORAGE_KEYS.EMAIL, sessionData.email);
+      const accountState = await prepareLocalAccount(sessionData);
+      if (cancelled) return;
+      accountPrepared = true;
+      setAccountBlocked(accountState === "account-mismatch");
+      setAccountReady(true);
+      if (accountState !== "active") return;
 
       switch (getUserSyncState(sessionData.userUpdatedAt)) {
         case "CLIENT_OUTDATED":
@@ -134,11 +130,43 @@ export function ClientAuthWrapper({
     }
 
     if (sessionData) {
-      syncData(sessionData);
+      void syncData(sessionData).catch((error) => {
+        console.error("Account synchronization failed:", error);
+        if (!cancelled) {
+          if (!accountPrepared) setAccountBlocked(true);
+          setAccountReady(true);
+        }
+      });
+    } else {
+      setAccountReady(true);
     }
+    return () => { cancelled = true; };
+  }, [sessionData]);
+
+  useEffect(() => {
+    const retry = () => {
+      if (
+        !navigator.onLine || document.visibilityState === "hidden" ||
+        isDemoMode() || !localStorage.getItem(LOCAL_STORAGE_KEYS.USER_ID) ||
+        localStorage.getItem(LOCAL_STORAGE_KEYS.IS_SESSION_VALID) !== "true"
+      ) return;
+      void syncCategories();
+      void syncExpenses();
+    };
+    window.addEventListener("online", retry);
+    window.addEventListener("focus", retry);
+    document.addEventListener("visibilitychange", retry);
+    const interval = window.setInterval(retry, 60_000);
+    return () => {
+      window.removeEventListener("online", retry);
+      window.removeEventListener("focus", retry);
+      document.removeEventListener("visibilitychange", retry);
+      window.clearInterval(interval);
+    };
   }, []);
 
   useEffect(() => {
+    if (!accountReady) return;
     const isSessionValid = getBooleanFromLocalStorage(
       LOCAL_STORAGE_KEYS.IS_SESSION_VALID
     );
@@ -151,9 +179,9 @@ export function ClientAuthWrapper({
     } else {
       setIsLoading(false);
     }
-  }, [pathname, router]);
+  }, [pathname, router, accountReady]);
 
-  if (isLoading) {
+  if (isLoading || !accountReady) {
     return;
   }
 
@@ -161,7 +189,7 @@ export function ClientAuthWrapper({
     <SelectedLanguageContext value={[selectedLanguage, setSelectedLanguage]}>
       <DefaultCurrencyContext value={[defaultCurrency, setDefaultCurrency]}>
         <PeriodContext value={{ period, onPeriodChange: handlePeriodChange }}>
-          {children}
+          {accountBlocked && pathname !== "/" ? null : children}
         </PeriodContext>
       </DefaultCurrencyContext>
     </SelectedLanguageContext>

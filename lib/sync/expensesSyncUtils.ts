@@ -1,90 +1,55 @@
-import {
-	fetchExpensesCount,
-	fetchModifiedExpensesBatch,
-	uploadExpensesBatch,
-} from "@/actions/syncActions";
+import { fetchModifiedExpensesBatch, uploadExpensesBatch } from "@/actions/syncActions";
+import type { IExpenseLocal } from "@/models/Expense";
 import { LOCAL_STORAGE_KEYS, SYNC_BATCH_SIZE } from "../constants";
 import { localDb } from "../indexedDb";
-import { resolveConflicts } from "./resolveConflicts";
-import { IExpenseLocal } from "@/models/Expense";
+import { createSyncRunner, syncCollection, unchangedSinceSnapshot } from "./syncCollection";
+import { requireActiveSyncSession } from "./checkSession";
 
-export async function syncExpenses(isFullResync = false) {
-	const lastSync = isFullResync
-		? new Date(0)
-		: new Date(
-				localStorage.getItem(LOCAL_STORAGE_KEYS.EXPENSES_UPDATED_AT) || 0
-		  );
+export const syncExpenses = createSyncRunner(async () => {
+  const userId = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_ID);
+  if (!userId) return;
+  const assertAccount = () => {
+    if (localStorage.getItem(LOCAL_STORAGE_KEYS.USER_ID) !== userId) {
+      throw new Error("Account changed during synchronization");
+    }
+  };
+  await requireActiveSyncSession(userId);
+  assertAccount();
+  await syncCollection<IExpenseLocal>({
+    batchSize: SYNC_BATCH_SIZE,
+    readLocal: () => localDb.expenses.toArray(),
+    readServer: () => getServerChanges(userId),
+    upload: (documents) => {
+      assertAccount();
+      return uploadExpensesBatch(documents, userId);
+    },
+    save: async (documents, snapshot) => {
+      assertAccount();
+      const original = new Map(snapshot.map((document) => [document._id, document]));
+      await localDb.transaction("rw", localDb.expenses, async () => {
+        assertAccount();
+        for (const document of documents) {
+          const current = await localDb.expenses.get(document._id);
+          if (unchangedSinceSnapshot(current, original.get(document._id)) &&
+              !unchangedSinceSnapshot(current, document)) {
+            await localDb.expenses.put(document);
+          }
+        }
+      });
+    },
+  });
+  localStorage.removeItem(LOCAL_STORAGE_KEYS.EXPENSES_UPDATED_AT);
+});
 
-	try {
-		const [localChanges, serverChanges] = await Promise.all([
-			getLocalChanges(lastSync),
-			getServerChanges(lastSync),
-		]);
-
-		const { toUpload, toSave, latestDocumentUpdatedAt } =
-			resolveConflicts<IExpenseLocal>(localChanges, serverChanges);
-
-		if (toUpload.length > 0) {
-			await uploadToServer(toUpload);
-		}
-
-		if (toSave.length > 0) {
-			await saveToLocalDb(toSave);
-		}
-
-		if (latestDocumentUpdatedAt)
-			localStorage.setItem(
-				LOCAL_STORAGE_KEYS.EXPENSES_UPDATED_AT,
-				latestDocumentUpdatedAt.toISOString()
-			);
-
-		await verifyExpenseCounts();
-	} catch (error) {
-		console.error("Expenses sync failed:", error);
-	}
-}
-
-async function getLocalChanges(since: Date): Promise<IExpenseLocal[]> {
-	return await localDb.expenses.where("updatedAt").above(since).toArray();
-}
-
-async function getServerChanges(since: Date): Promise<IExpenseLocal[]> {
-	let batch = 1;
-	let hasMore = true;
-	const allChanges = [];
-
-	while (hasMore) {
-		const response = await fetchModifiedExpensesBatch(batch, since);
-
-		allChanges.push(...response.data);
-		hasMore = response.hasMore;
-		batch++;
-	}
-
-	return allChanges;
-}
-
-async function uploadToServer(expenses: IExpenseLocal[]) {
-	for (let i = 0; i < expenses.length; i += SYNC_BATCH_SIZE) {
-		const batch = expenses.slice(i, i + SYNC_BATCH_SIZE);
-		await uploadExpensesBatch(batch);
-	}
-}
-
-async function saveToLocalDb(expenses: IExpenseLocal[]) {
-	await localDb.expenses.bulkPut(expenses);
-}
-
-async function verifyExpenseCounts() {
-	const localCount = await localDb.expenses.count();
-	const serverCount = await fetchExpensesCount();
-
-	if (localCount !== serverCount) {
-		console.warn(
-			`Mismatch expenses counts! Local: ${localCount}, Server: ${serverCount}. Running full resync...`
-		);
-
-		localStorage.setItem(LOCAL_STORAGE_KEYS.EXPENSES_UPDATED_AT, "0");
-		await syncExpenses(true);
-	}
+async function getServerChanges(userId: string): Promise<IExpenseLocal[]> {
+  const documents: IExpenseLocal[] = [];
+  let afterId: string | undefined;
+  while (true) {
+    const response = await fetchModifiedExpensesBatch(1, new Date(0), afterId, userId);
+    documents.push(...response.data);
+    if (!response.hasMore) return documents;
+    const nextId = response.data.at(-1)?._id;
+    if (!nextId || nextId === afterId) throw new Error("Invalid synchronization page");
+    afterId = nextId;
+  }
 }

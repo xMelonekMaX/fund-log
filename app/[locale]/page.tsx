@@ -14,10 +14,12 @@ import { InstallButton } from "@/components/InstallButton";
 import { DraggableContent } from "@/components/DraggableContent";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
+import { useState } from "react";
 
 export default function Login() {
   const router = useRouter();
   const t = useTranslations();
+  const [demoBlocked, setDemoBlocked] = useState(false);
 
   async function handleGoogleClick() {
     await createGoogleAuthURL();
@@ -27,9 +29,13 @@ export default function Login() {
     await createGithubAuthURL();
   }
 
-  function handleDemoModeClick() {
-    initializeDemoMode();
-    router.push("/overview");
+  async function handleDemoModeClick() {
+    try {
+      await initializeDemoMode();
+      router.push("/overview");
+    } catch {
+      setDemoBlocked(true);
+    }
   }
 
   return (
@@ -72,6 +78,7 @@ export default function Login() {
             {t("tryInDemoMode")}
           </GroupItem>
         </Group>
+        {demoBlocked && <p role="status">{t("demoBlockedByLocalData")}</p>}
 
         <InstallButton />
       </DraggableContent>

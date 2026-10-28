@@ -1,90 +1,55 @@
-import {
-	fetchCategoriesCount,
-	fetchModifiedCategoriesBatch,
-	uploadCategoriesBatch,
-} from "@/actions/syncActions";
-import { ICategoryLocal } from "@/models/Category";
+import { fetchModifiedCategoriesBatch, uploadCategoriesBatch } from "@/actions/syncActions";
+import type { ICategoryLocal } from "@/models/Category";
 import { LOCAL_STORAGE_KEYS, SYNC_BATCH_SIZE } from "../constants";
 import { localDb } from "../indexedDb";
-import { resolveConflicts } from "./resolveConflicts";
+import { createSyncRunner, syncCollection, unchangedSinceSnapshot } from "./syncCollection";
+import { requireActiveSyncSession } from "./checkSession";
 
-export async function syncCategories(isFullResync = false) {
-	const lastSync = isFullResync
-		? new Date(0)
-		: new Date(
-				localStorage.getItem(LOCAL_STORAGE_KEYS.CATEGORIES_UPDATED_AT) || 0
-		  );
+export const syncCategories = createSyncRunner(async () => {
+  const userId = localStorage.getItem(LOCAL_STORAGE_KEYS.USER_ID);
+  if (!userId) return;
+  const assertAccount = () => {
+    if (localStorage.getItem(LOCAL_STORAGE_KEYS.USER_ID) !== userId) {
+      throw new Error("Account changed during synchronization");
+    }
+  };
+  await requireActiveSyncSession(userId);
+  assertAccount();
+  await syncCollection<ICategoryLocal>({
+    batchSize: SYNC_BATCH_SIZE,
+    readLocal: () => localDb.categories.toArray(),
+    readServer: () => getServerChanges(userId),
+    upload: (documents) => {
+      assertAccount();
+      return uploadCategoriesBatch(documents, userId);
+    },
+    save: async (documents, snapshot) => {
+      assertAccount();
+      const original = new Map(snapshot.map((document) => [document._id, document]));
+      await localDb.transaction("rw", localDb.categories, async () => {
+        assertAccount();
+        for (const document of documents) {
+          const current = await localDb.categories.get(document._id);
+          if (unchangedSinceSnapshot(current, original.get(document._id)) &&
+              !unchangedSinceSnapshot(current, document)) {
+            await localDb.categories.put(document);
+          }
+        }
+      });
+    },
+  });
+  localStorage.removeItem(LOCAL_STORAGE_KEYS.CATEGORIES_UPDATED_AT);
+});
 
-	try {
-		const [localChanges, serverChanges] = await Promise.all([
-			getLocalChanges(lastSync),
-			getServerChanges(lastSync),
-		]);
-
-		const { toUpload, toSave, latestDocumentUpdatedAt } =
-			resolveConflicts<ICategoryLocal>(localChanges, serverChanges);
-
-		if (toUpload.length > 0) {
-			await uploadToServer(toUpload);
-		}
-
-		if (toSave.length > 0) {
-			await saveToLocalDb(toSave);
-		}
-
-		if (latestDocumentUpdatedAt)
-			localStorage.setItem(
-				LOCAL_STORAGE_KEYS.CATEGORIES_UPDATED_AT,
-				latestDocumentUpdatedAt.toISOString()
-			);
-
-		await verifyCategoryCounts();
-	} catch (error) {
-		console.error("Categories sync failed:", error);
-	}
-}
-
-async function getLocalChanges(since: Date): Promise<ICategoryLocal[]> {
-	return await localDb.categories.where("updatedAt").above(since).toArray();
-}
-
-async function getServerChanges(since: Date): Promise<ICategoryLocal[]> {
-	let batch = 1;
-	let hasMore = true;
-	const allChanges = [];
-
-	while (hasMore) {
-		const response = await fetchModifiedCategoriesBatch(batch, since);
-
-		allChanges.push(...response.data);
-		hasMore = response.hasMore;
-		batch++;
-	}
-
-	return allChanges;
-}
-
-async function uploadToServer(categories: ICategoryLocal[]) {
-	for (let i = 0; i < categories.length; i += SYNC_BATCH_SIZE) {
-		const batch = categories.slice(i, i + SYNC_BATCH_SIZE);
-		await uploadCategoriesBatch(batch);
-	}
-}
-
-async function saveToLocalDb(categories: ICategoryLocal[]) {
-	await localDb.categories.bulkPut(categories);
-}
-
-async function verifyCategoryCounts() {
-	const localCount = await localDb.categories.count();
-	const serverCount = await fetchCategoriesCount();
-
-	if (localCount !== serverCount) {
-		console.warn(
-			`Mismatch categories counts! Local: ${localCount}, Server: ${serverCount}. Running full resync...`
-		);
-
-		localStorage.setItem(LOCAL_STORAGE_KEYS.CATEGORIES_UPDATED_AT, "0");
-		await syncCategories(true);
-	}
+async function getServerChanges(userId: string): Promise<ICategoryLocal[]> {
+  const documents: ICategoryLocal[] = [];
+  let afterId: string | undefined;
+  while (true) {
+    const response = await fetchModifiedCategoriesBatch(1, new Date(0), afterId, userId);
+    documents.push(...response.data);
+    if (!response.hasMore) return documents;
+    const nextId = response.data.at(-1)?._id;
+    if (!nextId || nextId === afterId) throw new Error("Invalid synchronization page");
+    afterId = nextId;
+  }
 }
